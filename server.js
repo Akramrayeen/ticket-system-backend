@@ -233,4 +233,40 @@ app.get('/api/tickets/:status', async (req, res) => {
   }
 });
 
+// Send a reply to the ticket raiser's email
+app.post('/api/tickets/reply', async (req, res) => {
+  const { ticketId, replyMessage } = req.body;
+
+  try {
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.status(404).json({ message: 'Ticket not found' });
+    }
+
+    // Configure nodemailer to send the reply email
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.GMAIL_USER, // Admin email
+        pass: process.env.GMAIL_PASS, // Admin email password
+      },
+    });
+
+    const mailOptions = {
+      from: process.env.GMAIL_USER,
+      to: ticket.email, // Send reply to the ticket raiser's email
+      subject: `Reply to Your Ticket: ${ticket.subject}`,
+      text: replyMessage,
+    };
+
+    // Send the email
+    await transporter.sendMail(mailOptions);
+
+    res.status(200).json({ message: 'Reply sent successfully' });
+  } catch (error) {
+    console.error('Error sending reply:', error);
+    res.status(500).json({ message: 'Failed to send reply' });
+  }
+});
+
 
