@@ -20,11 +20,27 @@ const storage = multer.diskStorage({
     cb(null, 'uploads/');
   },
   filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
+    cb(null, Date.now() + path.extname(file.originalname)); // Ensures unique file names
   },
 });
 
-const upload = multer({ storage: storage });
+const fileFilter = (req, file, cb) => {
+  // Allow all types of media (You can restrict this by changing the regex pattern)
+  const fileTypes = /jpg|jpeg|png|gif|mp4|mov|webm|mp3|pdf|doc|docx|txt|xlsx/;
+  const extname = fileTypes.test(path.extname(file.originalname).toLowerCase());
+  const mimetype = fileTypes.test(file.mimetype);
+
+  if (extname && mimetype) {
+    return cb(null, true);
+  } else {
+    return cb(new Error('Invalid file type. Only images, videos, and documents are allowed.'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+});
 
 // MongoDB Connection
 mongoose.connect(process.env.MONGO_URI, { 
@@ -43,7 +59,7 @@ const ticketSchema = new mongoose.Schema({
   subject: String,
   email: String,
   description: String,
-  media: String,
+  media: [String], // Updated to handle multiple files
   status: { type: String, default: 'Open' },
   createdAt: { type: Date, default: Date.now }
 });
@@ -65,9 +81,9 @@ app.post('/api/check-ticket', async (req, res) => {
 });
 
 // Create Ticket
-app.post('/api/tickets', upload.single('media'), async (req, res) => {
+app.post('/api/tickets', upload.array('media', 5), async (req, res) => {  // Allow up to 5 files
   const { name, issue, department, deskId, subject, email, description } = req.body;
-  const media = req.file ? req.file.path : null;
+  const media = req.files ? req.files.map(file => file.path) : [];
 
   try {
     const existingTicket = await Ticket.findOne({ name, issue, department, deskId });
@@ -220,7 +236,6 @@ app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
 });
 
-
 // Fetch tickets by status
 app.get('/api/tickets/:status', async (req, res) => {
   const { status } = req.params;
@@ -253,20 +268,26 @@ app.post('/api/tickets/reply', async (req, res) => {
     });
 
     const mailOptions = {
-      from: process.env.GMAIL_USER,
-      to: ticket.email, // Send reply to the ticket raiser's email
-      subject: `Reply to Your Ticket: ${ticket.subject}`,
-      text: replyMessage,
+      from: process.env.MAIL_USER, // Admin email
+      to: ticket.email, // Ticket raiser's email
+      subject: `Re: Ticket #${ticketId} - Your Ticket Status`,
+      text: `Hello, \n\nYour ticket has been replied to: \n\n${replyMessage}`,
     };
 
-    // Send the email
-    await transporter.sendMail(mailOptions);
+    transporter.sendMail(mailOptions, (error, info) => {
+      if (error) {
+        console.log(error);
+        return res.status(500).json({ message: 'Failed to send reply email' });
+      }
 
-    res.status(200).json({ message: 'Reply sent successfully' });
-  } catch (error) {
-    console.error('Error sending reply:', error);
-    res.status(500).json({ message: 'Failed to send reply' });
+      console.log('Reply email sent: ' + info.response);
+      res.status(200).json({
+        message: `Reply email sent to ticket raiser for ticket ${ticketId}`,
+      });
+    });
+
+  } catch (err) {
+    console.error('Error sending reply email:', err);
+    res.status(500).json({ message: 'Error sending reply email' });
   }
 });
-
-
